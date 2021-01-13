@@ -454,19 +454,26 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     alpha = 3
     # label_input = tf.placeholder(tf.float32, shape=[None, num_labels], name='label_input')
     # label_input = tf.one_hot(labels, depth=num_labels, dtype=tf.float32, name='label_input') #[batch, ]->[batch, num_labels]
-    label_input_ids = tf.tlie([tf.range(num_labels)], [len(labels), 1]) #[batch, num_labels]
+    tf.logging.info("the shape of labels:")
+    tf.logging.info(labels.get_shape().as_list())
+    label_input_ids = tf.tile([tf.range(num_labels)], [labels.get_shape().as_list()[0], 1]) #[batch, num_labels]
+    tf.logging.info("the shape of label_input_ids:")
     tf.logging.info(label_input_ids.shape)
     label_embedding_matrix = tf.get_variable( # [num_labels, hidden_size]
         name="label_embedding_matrix",
         shape=[num_labels, hidden_size],
         initializer=tf.truncated_normal_initializer(stddev=0.02))
     #label_output = tf.matmul(label_input, label_embedding_matrix)# [batch, num_labels] -> [batch, hidde_size]
-    label_output =tf.nn.embedding_lookup_sparse(label_embedding_matrix, label_input_ids) # [batch, num_labels] -> [batch, num_labels, hidden_size]
+    label_output =tf.nn.embedding_lookup(label_embedding_matrix, label_input_ids) # [batch, num_labels] -> [batch, num_labels, hidden_size]
 
     label_emb = tf.layers.dense(label_output, hidden_size, activation='tanh', name='label_emb')#[[batch, num_labels, hidden_size]
+    tf.logging.info("label_emb.shape:")
+    tf.logging.info(label_emb.shape)
     # similarity part:
     # doc_product = tf.reduce_sum(tf.multiply(logits, label_emb), axis=-1) # (n,d) dot (d,1) --> (n,1)
-    text_emb = tf.expand_dims(logits, -1, name='text_emb') #[batch, hidden_size] -> [batch, hidden_size, 1]
+    text_emb = tf.expand_dims(output_layer, -1, name='text_emb') #[batch, hidden_size] -> [batch, hidden_size, 1]
+    tf.logging.info("text_emb.shape:")
+    tf.logging.info(text_emb.shape)
     doc_product = tf.squeeze(tf.matmul(label_emb, text_emb), axis=-1) #[batch, num_labels, 1] -> [batch, num_labels]
     # doc_product = Dot(axes=(2,1))([label_emb,text_emb]) # (n,d) dot (d,1) --> (n,1)
     label_confusion_vector = tf.nn.softmax(doc_product, axis=-1)
@@ -666,8 +673,8 @@ class MyProcessor(DataProcessor):
     def get_labels(self):
         """Gets the list of labels for this data set."""
 
-        return ['anger', 'disgusting&sad&fear', 'trouble', 'question&bored&alertness', 'neutral',
-                'trust&wonder&calm', 'happy', 'favorite&passion&like', 'enrapt']
+        return ['most-negative', 'negative', 'light-negative', 'neutral',
+                'light-positive', 'positive', 'most-positive']
 
     def create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets. each line is
