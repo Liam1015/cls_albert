@@ -111,7 +111,7 @@ class bertPredict(object):
 
 if __name__ == '__main__':
     name_t_start = datetime.now()
-    bert = bertPredict('./model_pb/scene', 'albert_tiny/vocab.txt')
+    bert = bertPredict('./model_pb/sentiment', './albert_tiny/vocab.txt')
     inputs = ['你给我记住我是你爸爸', '打开吸顶灯', '我想听你贝加尔湖畔','上升']
     # inputs = '你给我记住我是你爸爸'
 
