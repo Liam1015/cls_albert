@@ -450,21 +450,22 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     log_probs = tf.nn.log_softmax(logits, axis=-1)
     one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
 
-    #label_encoder
+    # #label_encoder
     alpha = 3
-    # label_input = tf.placeholder(tf.float32, shape=[None, num_labels], name='label_input')
-    # label_input = tf.one_hot(labels, depth=num_labels, dtype=tf.float32, name='label_input') #[batch, ]->[batch, num_labels]
+
+    label_input = tf.one_hot(labels, depth=num_labels, dtype=tf.float32, name='label_input') #[batch, ]->[batch, num_labels]
     tf.logging.info("the shape of labels:")
     tf.logging.info(labels.get_shape().as_list())
-    label_input_ids = tf.tile([tf.range(num_labels)], [labels.get_shape().as_list()[0], 1]) #[batch, num_labels]
+    label_input_ids = tf.tile([tf.range(num_labels)], [label_input.shape[0], 1]) #[batch, num_labels]
+
     tf.logging.info("the shape of label_input_ids:")
     tf.logging.info(label_input_ids.shape)
+
     label_embedding_matrix = tf.get_variable( # [num_labels, hidden_size]
         name="label_embedding_matrix",
         shape=[num_labels, hidden_size],
         initializer=tf.truncated_normal_initializer(stddev=0.02))
-    #label_output = tf.matmul(label_input, label_embedding_matrix)# [batch, num_labels] -> [batch, hidde_size]
-    label_output =tf.nn.embedding_lookup(label_embedding_matrix, label_input_ids) # [batch, num_labels] -> [batch, num_labels, hidden_size]
+    label_output = tf.nn.embedding_lookup(label_embedding_matrix, label_input_ids) # [batch, num_labels] -> [batch, num_labels, hidden_size]
 
     label_emb = tf.layers.dense(label_output, hidden_size, activation='tanh', name='label_emb')#[[batch, num_labels, hidden_size]
     tf.logging.info("label_emb.shape:")
@@ -484,6 +485,49 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     loss1 = tf.reduce_sum(y_s * log_y_s, axis=-1)
     loss2 = -tf.reduce_sum(y_s *log_probs, axis=-1)
     per_example_loss = loss1 + loss2
+
+
+    # label_encoder
+    # alpha = 3
+    # label_input = tf.one_hot(labels, depth=num_labels, dtype=tf.float32, name='label_input') #[batch, ]->[batch, num_labels]
+    # tf.logging.info("the shape of labels:")
+    # tf.logging.info(labels.get_shape().as_list())
+    # # label_input_ids = tf.tile([tf.range(num_labels)], [tf.convert_to_tensor(labels.get_shape().as_list()[0]), 1]) #[batch, num_labels]
+    #
+    # tf.logging.info("the shape of label_input:")
+    # tf.logging.info(label_input.shape)
+    #
+    # label_embedding_matrix = tf.get_variable(  # [num_labels, hidden_size]
+    #     name="label_embedding_matrix",
+    #     shape=[num_labels, hidden_size],
+    #     initializer=tf.truncated_normal_initializer(stddev=0.02))
+    # label_output = tf.matmul(label_input, label_embedding_matrix)# [batch, num_labels] -> [batch, hidde_size]
+    # # label_output = tf.nn.embedding_lookup(label_embedding_matrix,
+    # #                                       label_input_ids)  # [batch, num_labels] -> [batch, num_labels, hidden_size]
+    #
+    # label_emb = tf.layers.dense(label_output, hidden_size, activation='tanh',
+    #                             name='label_emb')  # [[batch, num_labels, hidden_size]
+    # tf.logging.info("label_emb.shape:")
+    # tf.logging.info(label_emb.shape)
+    # # similarity part:
+    # doc_product = tf.reduce_sum(tf.multiply(output_layer, label_emb), axis=-1) # (n,d) dot (d,1) --> (n,1)
+    # doc_product = tf.expand_dims(doc_product, -1)
+    # print("doc_product.shape:")
+    # print(doc_product.shape)
+    # doc_product = tf.layers.dense(doc_product, num_labels)
+    # # text_emb = tf.expand_dims(output_layer, -1, name='text_emb')  # [batch, hidden_size] -> [batch, hidden_size, 1]
+    # # tf.logging.info("text_emb.shape:")
+    # # tf.logging.info(text_emb.shape)
+    # # doc_product = tf.squeeze(tf.matmul(label_emb, text_emb), axis=-1)  # [batch, num_labels, 1] -> [batch, num_labels]
+    # # doc_product = Dot(axes=(2,1))([label_emb,text_emb]) # (n,d) dot (d,1) --> (n,1)
+    # label_confusion_vector = tf.nn.softmax(doc_product, axis=-1)
+    # simulated_label_distribution = label_confusion_vector + alpha * one_hot_labels
+    # y_s = tf.nn.softmax(simulated_label_distribution, axis=-1)
+    # log_y_s = tf.nn.log_softmax(simulated_label_distribution, axis=-1)
+    # # KL divergence
+    # loss1 = tf.reduce_sum(y_s * log_y_s, axis=-1)
+    # loss2 = -tf.reduce_sum(y_s * log_probs, axis=-1)
+    # per_example_loss = loss1 + loss2
 
     # per_example_loss = KLD(simulated_label_distribution, probabilities)
     # per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1) # todo 08-29 try temp-loss
@@ -527,6 +571,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       is_real_example = tf.ones(tf.shape(label_ids), dtype=tf.float32)
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
+
+
 
     (total_loss, per_example_loss, logits, probabilities) = create_model(
         bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
