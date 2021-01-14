@@ -455,7 +455,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     label_input = tf.one_hot(labels, depth=num_labels, dtype=tf.float32, name='label_input') #[batch, ]->[batch, num_labels]
     tf.logging.info("the shape of labels:")
     tf.logging.info(labels.get_shape().as_list())
-    label_input_ids = tf.tile([tf.range(num_labels)], [label_input.shape[0], 1]) #[batch, num_labels]
+    label_input_ids = tf.tile([tf.range(num_labels)], [label_input.shape[0], 1], name='label_input_ids') #[batch, num_labels]
 
     tf.logging.info("the shape of label_input_ids:")
     tf.logging.info(label_input_ids.shape)
@@ -604,15 +604,37 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
-      train_op = optimization.create_optimizer(lcm_stop_steps,
-                                               total_loss, total_lcm_loss,
-                                               learning_rate, num_train_steps, num_warmup_steps, use_tpu)
+
+      global_step = tf.train.get_or_create_global_step()
+      global_steps = tf.cast(global_step, tf.int32)
+      tf.logging.info(global_steps)
+      #when current_steps < lcm_stop_steps, use lcm_loss, otherwise use origin_loss.
+      use_lcm_loss = tf.greater(tf.constant(lcm_stop_steps), global_steps) #True: lcm_loss, False: origin_loss
+      tf.logging.info(tf.constant(lcm_stop_steps))
+      tf.logging.info(use_lcm_loss)
+
+      loss_flag = tf.cond(use_lcm_loss, lambda :"*****USE LCM LOSS*****", lambda :"*****USE ORIGIN LOSS*****")
+      # tf.logging.info(loss_flag)
+
+      loss = tf.cond(use_lcm_loss, lambda: total_lcm_loss, lambda: total_loss)
+
+      train_op = optimization.create_optimizer(global_step, loss, learning_rate, num_train_steps,
+                                               num_warmup_steps, use_tpu)
+
+      original_loss = tf.train.LoggingTensorHook({"original_loss": total_loss}, every_n_iter=100)
+      lcm_loss = tf.train.LoggingTensorHook({"lcm_loss": total_lcm_loss}, every_n_iter=100)
+      loss_flag = tf.train.LoggingTensorHook({"loss_flag": loss_flag}, every_n_iter=100)
+      global_steps_count = tf.train.LoggingTensorHook({"globle_steps": global_steps}, every_n_iter=100)
+
+
 
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
-          loss=total_loss,
+          loss=loss,
           train_op=train_op,
+          training_hooks=[original_loss, lcm_loss, loss_flag, global_steps_count],
           scaffold_fn=scaffold_fn)
+
     elif mode == tf.estimator.ModeKeys.EVAL:
 
       def metric_fn(per_example_loss, label_ids, logits, is_real_example):
@@ -818,7 +840,9 @@ def main(_):
     num_train_steps = int(len(train_examples) / FLAGS.train_batch_size *
                           FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
-    lcm_stop_steps = int(FLAGS.train_batch_size * FLAGS.lcm_stop_epochs)
+    lcm_stop_steps = int(len(train_examples) / FLAGS.train_batch_size *
+                          FLAGS.lcm_stop_epochs)
+
 
 
   model_fn = model_fn_builder(
