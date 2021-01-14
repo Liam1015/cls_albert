@@ -22,7 +22,7 @@ import collections
 import csv
 import os
 import modeling
-import optimization_finetuning as optimization
+import optimization_finetuning_lcm as optimization
 import tokenization
 import tensorflow as tf
 # from loss import bi_tempered_logistic_loss
@@ -87,8 +87,11 @@ flags.DEFINE_integer("predict_batch_size", 1, "Total batch size for predict.")
 
 flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
 
-flags.DEFINE_float("num_train_epochs", 2.0,
+flags.DEFINE_float("num_train_epochs", 50,
                    "Total number of training epochs to perform.")
+flags.DEFINE_float("lcm_stop_epochs", 10,
+                   "Total number of LCM stop epochs to perform.")
+
 
 flags.DEFINE_float(
     "warmup_proportion", 0.1,
@@ -400,10 +403,6 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
     else:
       tokens_b.pop()
 
-def KLD(p, q):
-
-    return tf.reduce_sum(tf.matmul(p, tf.log(tf.div(p,q))))
-
 
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
                  labels, num_labels, use_one_hot_embeddings):
@@ -484,7 +483,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     #KL divergence
     loss1 = tf.reduce_sum(y_s * log_y_s, axis=-1)
     loss2 = -tf.reduce_sum(y_s *log_probs, axis=-1)
-    per_example_loss = loss1 + loss2
+    per_example_loss_lcm = loss1 + loss2
 
 
     # label_encoder
@@ -530,7 +529,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     # per_example_loss = loss1 + loss2
 
     # per_example_loss = KLD(simulated_label_distribution, probabilities)
-    # per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1) # todo 08-29 try temp-loss
+    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1) # todo 08-29 try temp-loss
     ###############bi_tempered_logistic_loss############################################################################
     # print("##cross entropy loss is used...."); tf.logging.info("##cross entropy loss is used....")
     # t1=0.9 #t1=0.90
@@ -539,9 +538,10 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     #tf.logging.info("per_example_loss:"+str(per_example_loss.shape))
     ##############bi_tempered_logistic_loss#############################################################################
 
-    loss = tf.reduce_mean(per_example_loss)
+    lcm_loss = tf.reduce_mean(per_example_loss_lcm, name='lcm_loss')
+    loss = tf.reduce_mean(per_example_loss,name='loss')
 
-    return (loss, per_example_loss, logits, probabilities)
+    return (lcm_loss, loss, per_example_loss, logits, probabilities)
 
 def layer_norm(input_tensor, name=None):
   """Run layer normalization on the last dimension of the tensor."""
@@ -550,7 +550,7 @@ def layer_norm(input_tensor, name=None):
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings):
+                     use_one_hot_embeddings, lcm_stop_steps):
   """Returns `model_fn` closure for TPUEstimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -574,7 +574,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
 
 
-    (total_loss, per_example_loss, logits, probabilities) = create_model(
+    (total_lcm_loss, total_loss, per_example_loss, logits, probabilities) = create_model(
         bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
         num_labels, use_one_hot_embeddings)
 
@@ -604,9 +604,9 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
-
-      train_op = optimization.create_optimizer(
-          total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
+      train_op = optimization.create_optimizer(lcm_stop_steps,
+                                               total_loss, total_lcm_loss,
+                                               learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
@@ -818,6 +818,8 @@ def main(_):
     num_train_steps = int(len(train_examples) / FLAGS.train_batch_size *
                           FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
+    lcm_stop_steps = int(FLAGS.train_batch_size * FLAGS.lcm_stop_epochs)
+
 
   model_fn = model_fn_builder(
       bert_config=bert_config,
@@ -827,7 +829,8 @@ def main(_):
       num_train_steps=num_train_steps,
       num_warmup_steps=num_warmup_steps,
       use_tpu=FLAGS.use_tpu,
-      use_one_hot_embeddings=FLAGS.use_tpu)
+      use_one_hot_embeddings=FLAGS.use_tpu,
+      lcm_stop_steps=lcm_stop_steps)
 
   # If TPU is not available, this will fall back to normal Estimator on CPU
   # or GPU.
@@ -849,6 +852,7 @@ def main(_):
     tf.logging.info("  Num examples = %d", len(train_examples))
     tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
     tf.logging.info("  Num steps = %d", num_train_steps)
+    tf.logging.info("  LCM stop steps = %d", lcm_stop_steps)
     train_input_fn = file_based_input_fn_builder(
         input_file=train_file,
         seq_length=FLAGS.max_seq_length,
