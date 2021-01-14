@@ -450,7 +450,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
 
     # #label_encoder
-    alpha = 3
+    alpha = 4
 
     label_input = tf.one_hot(labels, depth=num_labels, dtype=tf.float32, name='label_input') #[batch, ]->[batch, num_labels]
     tf.logging.info("the shape of labels:")
