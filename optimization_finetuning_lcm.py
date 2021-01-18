@@ -22,12 +22,10 @@ import re
 import tensorflow as tf
 
 
-# def create_optimizer(lcm_stop_steps, loss, loss_lcm, init_lr, num_train_steps, num_warmup_steps, use_tpu):
-def create_optimizer(global_step, loss, init_lr, num_train_steps, num_warmup_steps, use_tpu):
+def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu):
   """Creates an optimizer training op."""
-  # global_step = tf.train.get_or_create_global_step()
-
-
+  global_step = tf.train.get_or_create_global_step()
+  global learning_rates
   learning_rate = tf.constant(value=init_lr, shape=[], dtype=tf.float32)
 
   # Implements linear decay of the learning rate.
@@ -71,17 +69,7 @@ def create_optimizer(global_step, loss, init_lr, num_train_steps, num_warmup_ste
 
   tvars = tf.trainable_variables()
   grads = tf.gradients(loss, tvars)
-  # global_steps = tf.cast(global_step, tf.int32)
-  # origin_train = tf.cond(tf.greater(global_steps, tf.constant(lcm_stop_steps)), lambda: True, lambda: False)
-  # use_lcm_loss = tf.greater(tf.constant(lcm_stop_steps), global_steps) # True: lcm_loss, False: origin_loss
-  # tf.logging.info(use_lcm_loss)
-  # if use_lcm_loss_flag is None:
-  # if use_lcm_loss is not None:
-  #     tf.logging.info("**********************************USE LCM LOSS**********************************")
-  #     grads = tf.gradients(loss_lcm, tvars)
-  # else:
-  #     tf.logging.info("**********************************USE ORIGIN LOSS**********************************")
-  #     grads = tf.gradients(loss, tvars)
+
   # This is how the model was pre-trained.
   (grads, _) = tf.clip_by_global_norm(grads, clip_norm=1.0)
 
@@ -93,7 +81,7 @@ def create_optimizer(global_step, loss, init_lr, num_train_steps, num_warmup_ste
   # a different optimizer, you should probably take this line out.
   new_global_step = global_step + 1
   train_op = tf.group(train_op, [global_step.assign(new_global_step)])
-  return train_op
+  return train_op, global_step,learning_rate
 
 
 class AdamWeightDecayOptimizer(tf.train.Optimizer):
