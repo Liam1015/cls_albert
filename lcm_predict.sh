@@ -13,4 +13,5 @@ python run_classifier_LCM.py \
   --init_checkpoint=$BERT_BASE_DIR/albert_model.ckpt \
   --max_seq_length=32 \
   --output_dir=$OUTPUT_DIR/ \
-  --predict_batch_size=128
+  --predict_batch_size=128 \
+  --alpha=4.0

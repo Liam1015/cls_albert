@@ -33,7 +33,6 @@ import time
 # from keras.layers import Input,Dense,LSTM,Embedding,Conv1D,MaxPooling1D
 
 
-global estimator
 
 flags = tf.flags
 
@@ -101,6 +100,8 @@ flags.DEFINE_float(
     "warmup_proportion", 0.1,
     "Proportion of training to perform linear learning rate warmup for. "
     "E.g., 0.1 = 10% of training.")
+
+flags.DEFINE_float("alpha", 4.0, "controlling how much of the one-hot vector wil be changed by LCD")
 
 flags.DEFINE_integer("save_checkpoints_steps", 1000,
                      "How often to save the model checkpoint.")
@@ -458,8 +459,6 @@ def create_model_lcm(bert_config, is_training, input_ids, input_mask, segment_id
         one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
 
         # #label_encoder
-        alpha = 4
-
         label_input = tf.one_hot(labels, depth=num_labels, dtype=tf.float32,
                                  name='label_input')  # [batch, ]->[batch, num_labels]
         tf.logging.info("the shape of labels:")
@@ -490,7 +489,7 @@ def create_model_lcm(bert_config, is_training, input_ids, input_mask, segment_id
                                  axis=-1)  # [batch, num_labels, 1] -> [batch, num_labels]
         # doc_product = Dot(axes=(2,1))([label_emb,text_emb]) # (n,d) dot (d,1) --> (n,1)
         label_confusion_vector = tf.nn.softmax(doc_product, axis=-1)
-        simulated_label_distribution = label_confusion_vector + alpha * one_hot_labels
+        simulated_label_distribution = label_confusion_vector + (FLAGS.alpha * one_hot_labels)
         y_s = tf.nn.softmax(simulated_label_distribution, axis=-1)
         log_y_s = tf.nn.log_softmax(simulated_label_distribution, axis=-1)
         # KL divergence
@@ -1252,7 +1251,7 @@ def main(_):
                 steps_and_files.append([global_step, cur_filename])
         steps_and_files = sorted(steps_and_files, key=lambda x: x[0])
 
-        output_eval_file = os.path.join(FLAGS.data_dir, "eval_results_albert_zh.txt")
+        output_eval_file = os.path.join(FLAGS.data_dir, "eval_results_albert_zh_lcm.txt")
         print("output_eval_file:", output_eval_file)
         tf.logging.info("output_eval_file:" + output_eval_file)
         with tf.gfile.GFile(output_eval_file, "w") as writer:
@@ -1347,4 +1346,6 @@ if __name__ == "__main__":
     flags.mark_flag_as_required("bert_config_file")
     flags.mark_flag_as_required("output_dir")
     flags.mark_flag_as_required("lcm_stop_epochs")
+    flags.mark_flag_as_required("alpha")
+
     tf.app.run()
