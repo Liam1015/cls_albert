@@ -18,5 +18,5 @@ python run_classifier_LCM.py \
   --learning_rate=1e-3 \
   --num_train_epochs=90 \
   --output_dir=$OUTPUT_DIR/ \
-  --lcm_stop_epochs=20
+  --lcm_stop_epochs=20 \
   --alpha=4.0

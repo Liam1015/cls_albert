@@ -70,7 +70,7 @@ flags.DEFINE_bool(
     "models and False for cased models.")
 
 flags.DEFINE_integer(
-    "max_seq_length", 128,
+    "max_seq_length", 32,
     "The maximum total input sequence length after WordPiece tokenization. "
     "Sequences longer than this will be truncated, and sequences shorter "
     "than this will be padded.")
@@ -93,7 +93,7 @@ flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
 
 flags.DEFINE_float("num_train_epochs", 50,
                    "Total number of training epochs to perform.")
-flags.DEFINE_float("lcm_stop_epochs", 10,
+flags.DEFINE_float("lcm_stop_epochs", 20,
                    "Total number of LCM stop epochs to perform.")
 
 flags.DEFINE_float(
@@ -816,7 +816,7 @@ def model_fn_builder_lcm(bert_config, num_labels, init_checkpoint, learning_rate
           mode=mode,
           loss=total_loss,
           train_op=train_op,
-          training_hooks=[loss_value_info, loss_type_info, global_steps_count, learning_rate_record],
+          training_hooks=[loss_type_info, global_steps_count, learning_rate_record, loss_value_info],
           scaffold_fn=scaffold_fn)
 
     elif mode == tf.estimator.ModeKeys.EVAL:
@@ -919,7 +919,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
           mode=mode,
           loss=total_loss,
           train_op=train_op,
-          training_hooks=[loss_value_info, loss_type_info, global_steps_count, learning_rate_record],
+          training_hooks=[loss_type_info, global_steps_count, learning_rate_record, loss_value_info],
           scaffold_fn=scaffold_fn)
     elif mode == tf.estimator.ModeKeys.EVAL:
 
@@ -1130,26 +1130,7 @@ def main(_):
         num_train_steps = int(len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
         num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
         lcm_stop_steps = int(len(train_examples) / FLAGS.train_batch_size * FLAGS.lcm_stop_epochs)
-    model_fn_lcm = model_fn_builder_lcm(
-        bert_config=bert_config,
-        num_labels=len(label_list),
-        init_checkpoint=FLAGS.init_checkpoint,
-        learning_rate=FLAGS.learning_rate,
-        num_train_steps=num_train_steps,
-        num_warmup_steps=num_warmup_steps,
-        use_tpu=FLAGS.use_tpu,
-        use_one_hot_embeddings=FLAGS.use_tpu
-        )
 
-    estimator_lcm = tf.contrib.tpu.TPUEstimator(
-        use_tpu=FLAGS.use_tpu,
-        model_fn=model_fn_lcm,
-        config=run_config,
-        train_batch_size=FLAGS.train_batch_size,
-        eval_batch_size=FLAGS.eval_batch_size,
-        predict_batch_size=FLAGS.predict_batch_size)
-
-    if FLAGS.do_train:
         train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
         train_file_exists = os.path.exists(train_file)
         print("###train_file_exists:", train_file_exists, " ;train_file:", train_file)
@@ -1161,11 +1142,32 @@ def main(_):
         tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
         tf.logging.info("  Num steps = %d", num_train_steps)
         tf.logging.info("  LCM stop steps = %d", lcm_stop_steps)
+
         train_input_fn = file_based_input_fn_builder(
             input_file=train_file,
             seq_length=FLAGS.max_seq_length,
             is_training=True,
             drop_remainder=True)
+
+        model_fn_lcm = model_fn_builder_lcm(
+            bert_config=bert_config,
+            num_labels=len(label_list),
+            init_checkpoint=FLAGS.init_checkpoint,
+            learning_rate=FLAGS.learning_rate,
+            num_train_steps=num_train_steps,
+            num_warmup_steps=num_warmup_steps,
+            use_tpu=FLAGS.use_tpu,
+            use_one_hot_embeddings=FLAGS.use_tpu
+            )
+
+        estimator_lcm = tf.contrib.tpu.TPUEstimator(
+            use_tpu=FLAGS.use_tpu,
+            model_fn=model_fn_lcm,
+            config=run_config,
+            train_batch_size=FLAGS.train_batch_size,
+            eval_batch_size=FLAGS.eval_batch_size,
+            predict_batch_size=FLAGS.predict_batch_size)
+
         tf.logging.info("*************************train lcm_model stage*************************")
 
         estimator_lcm.train(input_fn=train_input_fn, max_steps=lcm_stop_steps)
@@ -1189,7 +1191,7 @@ def main(_):
             use_tpu=FLAGS.use_tpu,
             use_one_hot_embeddings=FLAGS.use_tpu
         )
-        global estimator
+
         estimator = tf.contrib.tpu.TPUEstimator(
             use_tpu=FLAGS.use_tpu,
             model_fn=model_fn,
@@ -1201,7 +1203,6 @@ def main(_):
         estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
     if FLAGS.do_eval:
-
         eval_examples = processor.get_dev_examples(FLAGS.data_dir)
         num_actual_eval_examples = len(eval_examples)
         if FLAGS.use_tpu:
@@ -1240,6 +1241,32 @@ def main(_):
 
         #######################################################################################################################
         # evaluate all checkpoints; you can use the checkpoint with the best dev accuarcy
+
+        lcm_init_checkpoint = tf.train.latest_checkpoint(FLAGS.output_dir)
+        if lcm_init_checkpoint:
+            tf.logging.info("*************************LCM MODEL IS EXISTED*************************")
+            tf.logging.info("lcm_init_checkpoint:")
+            tf.logging.info(lcm_init_checkpoint)
+        else:
+            tf.logging.info("*************************LCM MODEL IS NOT EXISTED*************************")
+
+        model_fn = model_fn_builder(
+            bert_config=bert_config,
+            num_labels=len(label_list),
+            init_checkpoint=lcm_init_checkpoint,
+            learning_rate=FLAGS.learning_rate,
+            num_train_steps=num_train_steps,
+            num_warmup_steps=num_warmup_steps,
+            use_tpu=FLAGS.use_tpu,
+            use_one_hot_embeddings=FLAGS.use_tpu
+        )
+        estimator = tf.contrib.tpu.TPUEstimator(
+            use_tpu=FLAGS.use_tpu,
+            model_fn=model_fn,
+            config=run_config,
+            train_batch_size=FLAGS.train_batch_size,
+            eval_batch_size=FLAGS.eval_batch_size,
+            predict_batch_size=FLAGS.predict_batch_size)
         steps_and_files = []
         filenames = tf.gfile.ListDirectory(FLAGS.output_dir)
         for filename in filenames:
@@ -1345,7 +1372,6 @@ if __name__ == "__main__":
     flags.mark_flag_as_required("vocab_file")
     flags.mark_flag_as_required("bert_config_file")
     flags.mark_flag_as_required("output_dir")
-    flags.mark_flag_as_required("lcm_stop_epochs")
-    flags.mark_flag_as_required("alpha")
+
 
     tf.app.run()
